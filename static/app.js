@@ -145,9 +145,71 @@ function redrawNumbers() {
   drawNumbers();
 }
 
-// Stubs replaced by full implementation in Task 9
-function renderLegend() {}
-function openPicker(_colorNumber, _bgHex) {}
+function clearChildren(el) {
+  while (el.firstChild) el.removeChild(el.firstChild);
+}
+
+function renderLegend() {
+  clearChildren(legendEl);
+  beadData.colors.forEach(color => {
+    const chip = document.createElement('div');
+    chip.className = 'color-chip' + (overrides[color.number] ? ' overridden' : '');
+
+    const circle = document.createElement('div');
+    circle.className = 'chip-circle';
+    circle.style.background = color.hex;
+    circle.style.color = overrides[color.number] || autoContrast(color.hex);
+    circle.textContent = String(color.number);
+
+    const hexSpan = document.createElement('span');
+    hexSpan.className = 'chip-hex';
+    hexSpan.textContent = color.hex;
+
+    const countSpan = document.createElement('span');
+    countSpan.className = 'chip-count';
+    countSpan.textContent = 'x' + color.count;
+
+    const pickerEl = document.createElement('div');
+
+    if (overrides[color.number]) {
+      pickerEl.className = 'color-square';
+      pickerEl.style.background = overrides[color.number];
+      pickerEl.title = 'Подвійний клік — скинути на авто-контраст';
+      pickerEl.addEventListener('click', () => openPicker(color.number, color.hex));
+      pickerEl.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        delete overrides[color.number];
+        renderLegend();
+        redrawNumbers();
+      });
+    } else {
+      pickerEl.className = 'auto-icon';
+      pickerEl.textContent = 'A';
+      pickerEl.title = 'Авто-контраст — клік щоб змінити';
+      pickerEl.addEventListener('click', () => openPicker(color.number, color.hex));
+    }
+
+    chip.append(circle, hexSpan, countSpan, pickerEl);
+    legendEl.appendChild(chip);
+  });
+}
+
+function openPicker(colorNumber, bgHex) {
+  const input = document.createElement('input');
+  input.type = 'color';
+  input.value = overrides[colorNumber] || autoContrast(bgHex);
+  input.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+  document.body.appendChild(input);
+  input.addEventListener('input', e => {
+    overrides[colorNumber] = e.target.value;
+    renderLegend();
+    redrawNumbers();
+  });
+  input.addEventListener('change', () => {
+    if (document.body.contains(input)) document.body.removeChild(input);
+  });
+  input.click();
+}
 
 downloadBtn.addEventListener('click', () => {
   canvas.toBlob(blob => {
