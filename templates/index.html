@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BeadsColorizer</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header id="toolbar">
+  <span class="logo">BeadsColorizer</span>
+  <label class="btn btn-secondary" id="upload-label">
+    Завантажити фото
+    <input type="file" id="file-input" accept="image/*" hidden>
+  </label>
+  <div class="setting">
+    <label for="threshold-slider">Threshold:</label>
+    <input type="range" id="threshold-slider" min="0" max="100" value="30">
+    <span id="threshold-value">30</span>
+  </div>
+  <button id="process-btn" class="btn btn-primary" disabled>Обробити</button>
+  <button id="download-btn" class="btn btn-success" disabled>Завантажити PNG</button>
+</header>
+
+<div id="legend-bar" hidden>
+  <span class="legend-title">Унікальні кольори:</span>
+  <div id="legend"></div>
+  <span class="legend-hint">клік на значок кольору щоб змінити, подвійний клік — скинути</span>
+</div>
+
+<div id="progress-area" hidden>
+  <div id="progress-label">Обробка...</div>
+  <div id="progress-track"><div id="progress-fill"></div></div>
+</div>
+
+<main id="canvas-area">
+  <div id="placeholder">
+    <div class="ph-icon">img</div>
+    <p>Завантажте зображення та натисніть <b>Обробити</b></p>
+    <p class="hint">Результат відобразиться тут у повній роздільній здатності (2000px)</p>
+  </div>
+  <canvas id="main-canvas" hidden></canvas>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
