@@ -74,7 +74,7 @@ def upload():
     if 'file' not in request.files:
         return jsonify({'error': 'no file'}), 400
     file = request.files['file']
-    threshold = int(request.form.get('threshold', 30))
+    threshold = int(request.form.get('threshold', 12))
     job_id = uuid.uuid4().hex[:8]
     job_dir = os.path.join(TMP_DIR, job_id)
     os.makedirs(job_dir, exist_ok=True)
