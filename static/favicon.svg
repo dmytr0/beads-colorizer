@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- 3x3 bead grid -->
+  <circle cx="6"  cy="6"  r="5" fill="#e8af77"/>
+  <circle cx="16" cy="6"  r="5" fill="#df732d"/>
+  <circle cx="26" cy="6"  r="5" fill="#e8af77"/>
+  <circle cx="6"  cy="16" r="5" fill="#df732d"/>
+  <circle cx="16" cy="16" r="5" fill="#c73f07"/>
+  <circle cx="26" cy="16" r="5" fill="#df732d"/>
+  <circle cx="6"  cy="26" r="5" fill="#5a823f"/>
+  <circle cx="16" cy="26" r="5" fill="#5a823f"/>
+  <circle cx="26" cy="26" r="5" fill="#2b3825"/>
+</svg>
