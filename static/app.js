@@ -1,24 +1,28 @@
 'use strict';
 
-const fileInput = document.getElementById('file-input');
-const processBtn = document.getElementById('process-btn');
-const downloadBtn = document.getElementById('download-btn');
-const thresholdSlider = document.getElementById('threshold-slider');
+const fileInput    = document.getElementById('file-input');
+const processBtn   = document.getElementById('process-btn');
+const downloadBtn  = document.getElementById('download-btn');
+const legendBtn    = document.getElementById('legend-btn');
+const thresholdSlider  = document.getElementById('threshold-slider');
 const thresholdValueEl = document.getElementById('threshold-value');
 const progressArea = document.getElementById('progress-area');
 const progressFill = document.getElementById('progress-fill');
 const progressLabel = document.getElementById('progress-label');
-const legendBar = document.getElementById('legend-bar');
-const legendEl = document.getElementById('legend');
-const placeholder = document.getElementById('placeholder');
+const legendBar    = document.getElementById('legend-bar');
+const legendEl     = document.getElementById('legend');
+const placeholder  = document.getElementById('placeholder');
+const canvasArea   = document.getElementById('canvas-area');
+const zoomIndicator = document.getElementById('zoom-indicator');
 const canvas = document.getElementById('main-canvas');
-const ctx = canvas.getContext('2d');
+const ctx    = canvas.getContext('2d');
 
-let beadData = null;
-let overrides = {};       // {color_number: hex_string} — колір тексту
-let displayNumbers = {};  // {color_number: displayed_number} — перестановка номерів
-let skipped = new Set();  // set of color_numbers — виключити з нумерації
-let sourceImage = null;
+let beadData      = null;
+let overrides     = {};       // {color_number: hex} — колір цифр
+let displayNumbers = {};      // {color_number: displayed_number}
+let skipped       = new Set();
+let sourceImage   = null;
+let zoom          = 1.0;
 
 function resetState() {
   beadData = null;
@@ -26,28 +30,35 @@ function resetState() {
   displayNumbers = {};
   skipped = new Set();
   sourceImage = null;
+  zoom = 1.0;
 }
 
+// ── Threshold slider ──────────────────────────────────────────────────────────
 thresholdSlider.addEventListener('input', () => {
   thresholdValueEl.textContent = thresholdSlider.value;
 });
 
+// ── File select ───────────────────────────────────────────────────────────────
 fileInput.addEventListener('change', () => {
   if (fileInput.files.length > 0) {
     processBtn.disabled = false;
     downloadBtn.disabled = true;
+    legendBtn.disabled = true;
     canvas.hidden = true;
+    zoomIndicator.hidden = true;
     placeholder.hidden = false;
     legendBar.hidden = true;
     resetState();
   }
 });
 
+// ── Process ───────────────────────────────────────────────────────────────────
 processBtn.addEventListener('click', async () => {
   if (!fileInput.files.length) return;
 
   processBtn.disabled = true;
   downloadBtn.disabled = true;
+  legendBtn.disabled = true;
   legendBar.hidden = true;
   progressArea.hidden = false;
   progressFill.style.width = '0%';
@@ -95,21 +106,46 @@ async function loadResult(job_id) {
   img.src = '/result/' + job_id + '/image';
   img.onload = () => {
     sourceImage = img;
-    canvas.width = beadData.image_width;
+    canvas.width  = beadData.image_width;
     canvas.height = beadData.image_height;
     ctx.drawImage(img, 0, 0);
     drawNumbers();
     renderLegend();
 
-    placeholder.hidden = true;
+    // Fit image to canvas-area on first load
+    const availW = canvasArea.clientWidth  - 32;
+    const availH = canvasArea.clientHeight - 32;
+    zoom = Math.min(availW / beadData.image_width, availH / beadData.image_height, 1);
+    applyZoom();
+
+    placeholder.hidden = false; placeholder.hidden = true;
     canvas.hidden = false;
+    zoomIndicator.hidden = false;
     legendBar.hidden = false;
     progressArea.hidden = true;
     downloadBtn.disabled = false;
+    legendBtn.disabled = false;
     processBtn.disabled = false;
   };
 }
 
+// ── Zoom ──────────────────────────────────────────────────────────────────────
+canvasArea.addEventListener('wheel', e => {
+  if (canvas.hidden) return;
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+  zoom = Math.max(0.05, Math.min(10, zoom * factor));
+  applyZoom();
+}, { passive: false });
+
+function applyZoom() {
+  if (!beadData) return;
+  canvas.style.width  = Math.round(beadData.image_width  * zoom) + 'px';
+  canvas.style.height = Math.round(beadData.image_height * zoom) + 'px';
+  zoomIndicator.textContent = Math.round(zoom * 100) + '%';
+}
+
+// ── Canvas rendering ──────────────────────────────────────────────────────────
 function autoContrast(hex) {
   const r = parseInt(hex.slice(1, 3), 16) / 255;
   const g = parseInt(hex.slice(3, 5), 16) / 255;
@@ -159,22 +195,18 @@ function redrawNumbers() {
   drawNumbers();
 }
 
-// Swap displayed numbers between two colors.
-// newNum — the number the user typed for colorNumber.
+// ── Number swap ───────────────────────────────────────────────────────────────
 function swapNumbers(colorNumber, newNum) {
   const currentNum = getDisplayNumber(colorNumber);
   if (newNum === currentNum) return;
-
-  // Find which other color currently shows newNum
   const other = beadData.colors.find(c => getDisplayNumber(c.number) === newNum);
-
   displayNumbers[colorNumber] = newNum;
   if (other) displayNumbers[other.number] = currentNum;
-
   renderLegend();
   redrawNumbers();
 }
 
+// ── Legend ────────────────────────────────────────────────────────────────────
 function clearChildren(el) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
@@ -182,7 +214,7 @@ function clearChildren(el) {
 function renderLegend() {
   clearChildren(legendEl);
   beadData.colors.forEach(color => {
-    const isSkipped = skipped.has(color.number);
+    const isSkipped  = skipped.has(color.number);
     const displayNum = getDisplayNumber(color.number);
 
     const chip = document.createElement('div');
@@ -191,24 +223,20 @@ function renderLegend() {
     if (isSkipped) classes.push('skipped');
     chip.className = classes.join(' ');
 
-    // Colored circle with displayed number
     const circle = document.createElement('div');
     circle.className = 'chip-circle';
     circle.style.background = color.hex;
     circle.style.color = overrides[color.number] || autoContrast(color.hex);
     circle.textContent = String(displayNum);
 
-    // Hex code
     const hexSpan = document.createElement('span');
     hexSpan.className = 'chip-hex';
     hexSpan.textContent = color.hex;
 
-    // Count
     const countSpan = document.createElement('span');
     countSpan.className = 'chip-count';
     countSpan.textContent = 'x' + color.count;
 
-    // Number input — swap on change
     const numInput = document.createElement('input');
     numInput.type = 'number';
     numInput.className = 'chip-num-input';
@@ -219,7 +247,6 @@ function renderLegend() {
       if (val > 0) swapNumbers(color.number, val);
     });
 
-    // Skip checkbox
     const skipLabel = document.createElement('label');
     skipLabel.className = 'chip-skip';
     const skipCheck = document.createElement('input');
@@ -233,14 +260,13 @@ function renderLegend() {
     });
     skipLabel.append(skipCheck, document.createTextNode('skip'));
 
-    // Color picker
     const pickerEl = document.createElement('div');
     if (overrides[color.number]) {
       pickerEl.className = 'color-square';
       pickerEl.style.background = overrides[color.number];
       pickerEl.title = 'Подвійний клік — скинути на авто-контраст';
       pickerEl.addEventListener('click', () => openPicker(color.number, color.hex));
-      pickerEl.addEventListener('dblclick', (e) => {
+      pickerEl.addEventListener('dblclick', e => {
         e.stopPropagation();
         delete overrides[color.number];
         renderLegend();
@@ -275,12 +301,85 @@ function openPicker(colorNumber, bgHex) {
   input.click();
 }
 
+// ── Download PNG ──────────────────────────────────────────────────────────────
 downloadBtn.addEventListener('click', () => {
   canvas.toBlob(blob => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = 'beads-numbered.png';
+    a.click();
+    URL.revokeObjectURL(url);
+  }, 'image/png');
+});
+
+// ── Download Legend ───────────────────────────────────────────────────────────
+legendBtn.addEventListener('click', () => {
+  const SCALE  = 2;          // retina multiplier
+  const PAD    = 16 * SCALE;
+  const SQ     = 64 * SCALE; // colored square size
+  const GAP    = 12 * SCALE; // gap between rows
+  const ROW_H  = SQ + GAP;
+  const W      = 280 * SCALE;
+
+  // Sort by displayed number; skipped at the end
+  const sorted = [...beadData.colors].sort((a, b) => {
+    const da = getDisplayNumber(a.number);
+    const db = getDisplayNumber(b.number);
+    const sa = skipped.has(a.number) ? 1 : 0;
+    const sb = skipped.has(b.number) ? 1 : 0;
+    if (sa !== sb) return sa - sb;
+    return da - db;
+  });
+
+  const H = PAD * 2 + sorted.length * ROW_H - GAP;
+
+  const off = document.createElement('canvas');
+  off.width  = W;
+  off.height = H;
+  const oc = off.getContext('2d');
+
+  // Background
+  oc.fillStyle = '#161b22';
+  oc.fillRect(0, 0, W, H);
+
+  sorted.forEach((color, i) => {
+    const isSkip = skipped.has(color.number);
+    const displayNum = getDisplayNumber(color.number);
+    const x = PAD;
+    const y = PAD + i * ROW_H;
+
+    // Colored square (rounded)
+    const r = 8 * SCALE;
+    oc.fillStyle = color.hex;
+    oc.beginPath();
+    oc.roundRect(x, y, SQ, SQ, r);
+    oc.fill();
+
+    // Number on square (skip → no number)
+    if (!isSkip) {
+      const textColor = overrides[color.number] || autoContrast(color.hex);
+      oc.fillStyle = textColor;
+      oc.font = `bold ${26 * SCALE}px Arial`;
+      oc.textAlign = 'center';
+      oc.textBaseline = 'middle';
+      oc.fillText(String(displayNum), x + SQ / 2, y + SQ / 2);
+    }
+
+    // "— count" text
+    oc.fillStyle = '#c9d1d9';
+    oc.font = `${15 * SCALE}px Arial`;
+    oc.textAlign = 'left';
+    oc.textBaseline = 'middle';
+    const label = isSkip ? `— ${color.count}` : `— ${color.count}`;
+    oc.fillText(label, x + SQ + 14 * SCALE, y + SQ / 2);
+  });
+
+  off.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'beads-legend.png';
     a.click();
     URL.revokeObjectURL(url);
   }, 'image/png');

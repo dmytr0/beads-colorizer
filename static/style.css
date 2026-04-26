@@ -133,10 +133,25 @@ body {
   align-items: center;
   justify-content: center;
   padding: 16px;
+  position: relative;
 }
 #placeholder { text-align: center; color: #484f58; }
 .ph-icon { font-size: 48px; margin-bottom: 12px; }
 #placeholder p { margin-bottom: 6px; font-size: 14px; }
 .hint { font-size: 12px; color: #30363d; }
 
-#main-canvas { max-width: 100%; height: auto; display: block; border-radius: 4px; }
+#main-canvas { display: block; border-radius: 4px; cursor: crosshair; }
+
+#zoom-indicator {
+  position: absolute;
+  bottom: 10px;
+  right: 14px;
+  background: rgba(13,17,23,0.75);
+  color: #8b949e;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 10;
+  border: 1px solid #30363d;
+}
