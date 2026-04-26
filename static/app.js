@@ -41,6 +41,11 @@ const fileInput    = document.getElementById('file-input');
 const processBtn   = document.getElementById('process-btn');
 const downloadBtn  = document.getElementById('download-btn');
 const legendBtn    = document.getElementById('legend-btn');
+const saveBtn       = document.getElementById('save-btn');
+const saveFeedback  = document.getElementById('save-feedback');
+const projectsBtn   = document.getElementById('projects-btn');
+const projectsPanel = document.getElementById('projects-panel');
+const projectsClose = document.getElementById('projects-close');
 const thresholdSlider  = document.getElementById('threshold-slider');
 const thresholdValueEl = document.getElementById('threshold-value');
 const progressArea = document.getElementById('progress-area');
@@ -60,6 +65,7 @@ let overrides      = {};
 let displayNumbers = {};
 let skipped        = new Set();
 let sourceImage    = null;
+let currentSource  = null;  // {type: 'job'|'project', id: string}
 
 let zoom        = 1.0;
 let targetZoom  = 1.0;
@@ -75,6 +81,7 @@ function resetState() {
   displayNumbers = {};
   skipped = new Set();
   sourceImage = null;
+  currentSource = null;
   zoom = 1.0;
   targetZoom = 1.0;
   panX = 0;
@@ -97,6 +104,7 @@ fileInput.addEventListener('change', () => {
     zoomIndicator.hidden = true;
     placeholder.hidden = false;
     legendBar.hidden = true;
+    saveBtn.disabled = true;
     resetState();
   }
 });
@@ -108,6 +116,7 @@ processBtn.addEventListener('click', async () => {
   processBtn.disabled = true;
   downloadBtn.disabled = true;
   legendBtn.disabled = true;
+  saveBtn.disabled = true;
   legendBar.hidden = true;
   progressArea.hidden = false;
   progressFill.style.width = '0%';
@@ -150,9 +159,13 @@ function listenProgress(job_id) {
 async function loadResult(job_id) {
   const dataRes = await fetch('/result/' + job_id + '/data');
   beadData = await dataRes.json();
+  currentSource = { type: 'job', id: job_id };
+  _showCanvas('/result/' + job_id + '/image');
+}
 
+function _showCanvas(imageUrl) {
   const img = new Image();
-  img.src = '/result/' + job_id + '/image';
+  img.src = imageUrl;
   img.onload = () => {
     sourceImage = img;
     canvas.width  = beadData.image_width;
@@ -161,7 +174,6 @@ async function loadResult(job_id) {
     drawNumbers();
     renderLegend();
 
-    // Fit image to canvas-area and center it
     const fitZ = Math.min(
       canvasArea.clientWidth  / beadData.image_width,
       canvasArea.clientHeight / beadData.image_height,
@@ -180,6 +192,7 @@ async function loadResult(job_id) {
     progressArea.hidden = true;
     downloadBtn.disabled = false;
     legendBtn.disabled = false;
+    saveBtn.disabled = false;
     processBtn.disabled = false;
   };
 }
@@ -197,7 +210,7 @@ canvasArea.addEventListener('wheel', e => {
   const rect = canvasArea.getBoundingClientRect();
   zoomPivotX = e.clientX - rect.left;
   zoomPivotY = e.clientY - rect.top;
-  const factor = e.deltaY < 0 ? 1.18 : 1 / 1.18;
+  const factor = e.deltaY < 0 ? 1.05 : 1 / 1.05;
   targetZoom = Math.max(0.05, Math.min(10, targetZoom * factor));
   if (!zoomRaf) zoomRaf = requestAnimationFrame(zoomTick);
 }, { passive: false });
@@ -420,74 +433,245 @@ downloadBtn.addEventListener('click', () => {
   }, 'image/png');
 });
 
-// ── Download Legend ───────────────────────────────────────────────────────────
-legendBtn.addEventListener('click', () => {
-  const SCALE  = 2;          // retina multiplier
-  const PAD    = 16 * SCALE;
-  const SQ     = 64 * SCALE; // colored square size
-  const GAP    = 12 * SCALE; // gap between rows
-  const ROW_H  = SQ + GAP;
-  const W      = 280 * SCALE;
+// ── Legend canvas builder ─────────────────────────────────────────────────────
+function buildLegendCanvas() {
+  const SCALE = 2;
+  const PAD   = 16 * SCALE;
+  const SQ    = 64 * SCALE;
+  const GAP   = 12 * SCALE;
+  const ROW_H = SQ + GAP;
+  const W     = 280 * SCALE;
 
-  // Sort by displayed number; skipped at the end
   const sorted = [...beadData.colors].sort((a, b) => {
-    const da = getDisplayNumber(a.number);
-    const db = getDisplayNumber(b.number);
     const sa = skipped.has(a.number) ? 1 : 0;
     const sb = skipped.has(b.number) ? 1 : 0;
     if (sa !== sb) return sa - sb;
-    return da - db;
+    return getDisplayNumber(a.number) - getDisplayNumber(b.number);
   });
 
   const H = PAD * 2 + sorted.length * ROW_H - GAP;
-
   const off = document.createElement('canvas');
   off.width  = W;
   off.height = H;
   const oc = off.getContext('2d');
 
-  // Background
   oc.fillStyle = '#161b22';
   oc.fillRect(0, 0, W, H);
 
   sorted.forEach((color, i) => {
-    const isSkip = skipped.has(color.number);
+    const isSkip     = skipped.has(color.number);
     const displayNum = getDisplayNumber(color.number);
     const x = PAD;
     const y = PAD + i * ROW_H;
 
-    // Colored square (rounded)
-    const r = 8 * SCALE;
     oc.fillStyle = color.hex;
     oc.beginPath();
-    oc.roundRect(x, y, SQ, SQ, r);
+    oc.roundRect(x, y, SQ, SQ, 8 * SCALE);
     oc.fill();
 
-    // Number on square (skip → no number)
     if (!isSkip) {
-      const textColor = overrides[color.number] || autoContrast(color.hex);
-      oc.fillStyle = textColor;
+      oc.fillStyle = overrides[color.number] || autoContrast(color.hex);
       oc.font = `bold ${26 * SCALE}px Arial`;
       oc.textAlign = 'center';
       oc.textBaseline = 'middle';
       oc.fillText(String(displayNum), x + SQ / 2, y + SQ / 2);
     }
 
-    // "— count" text
     oc.fillStyle = '#c9d1d9';
     oc.font = `${15 * SCALE}px Arial`;
     oc.textAlign = 'left';
     oc.textBaseline = 'middle';
-    const label = isSkip ? `— ${color.count}` : `— ${color.count}`;
-    oc.fillText(label, x + SQ + 14 * SCALE, y + SQ / 2);
+    oc.fillText(`— ${color.count}`, x + SQ + 14 * SCALE, y + SQ / 2);
   });
 
-  off.toBlob(blob => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'beads-legend.png';
-    a.click();
-    URL.revokeObjectURL(url);
-  }, 'image/png');
+  return off;
+}
+
+// ── Legend modal ──────────────────────────────────────────────────────────────
+const legendModal       = document.getElementById('legend-modal');
+const legendModalOverlay = document.getElementById('legend-modal-overlay');
+const legendModalClose  = document.getElementById('legend-modal-close');
+const legendModalImg    = document.getElementById('legend-modal-img');
+const legendDownloadBtn = document.getElementById('legend-download-btn');
+
+legendBtn.addEventListener('click', () => {
+  legendModalImg.src = buildLegendCanvas().toDataURL('image/png');
+  legendModal.hidden = false;
 });
+legendModalOverlay.addEventListener('click', () => { legendModal.hidden = true; });
+legendModalClose.addEventListener('click',   () => { legendModal.hidden = true; });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { legendModal.hidden = true; closeProjectsPanel(); }
+});
+
+legendDownloadBtn.addEventListener('click', () => {
+  const a = document.createElement('a');
+  a.href = legendModalImg.src;
+  a.download = 'beads-legend.png';
+  a.click();
+});
+
+// ── Save project ──────────────────────────────────────────────────────────────
+saveBtn.addEventListener('click', async () => {
+  if (!beadData || !currentSource) return;
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Зберігаємо...';
+  saveFeedback.hidden = true;
+
+  const legendDataUrl = buildLegendCanvas().toDataURL('image/png');
+
+  const payload = {
+    source_type:     currentSource.type,
+    source_id:       currentSource.id,
+    threshold:       parseInt(thresholdSlider.value),
+    overrides:       overrides,
+    display_numbers: displayNumbers,
+    skipped:         [...skipped],
+    bead_data:       beadData,
+    legend_b64:      legendDataUrl.split(',')[1],
+  };
+
+  try {
+    const res  = await fetch('/project', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+    const data = await res.json();
+    saveBtn.textContent = 'Зберегти проєкт';
+    saveBtn.disabled = false;
+    saveFeedback.textContent = `✓ Збережено: ${data.name}`;
+    saveFeedback.hidden = false;
+    loadProjectsList();
+  } catch {
+    saveBtn.textContent = 'Зберегти проєкт';
+    saveBtn.disabled = false;
+    saveFeedback.textContent = '✗ Помилка збереження';
+    saveFeedback.style.color = '#f78166';
+    saveFeedback.hidden = false;
+  }
+});
+
+// ── Projects sidebar ──────────────────────────────────────────────────────────
+const projectsList = document.getElementById('projects-list');
+
+function openProjectsPanel() {
+  projectsPanel.classList.add('open');
+  loadProjectsList();
+}
+function closeProjectsPanel() {
+  projectsPanel.classList.remove('open');
+}
+
+projectsBtn.addEventListener('click', () => {
+  projectsPanel.classList.contains('open') ? closeProjectsPanel() : openProjectsPanel();
+});
+projectsClose.addEventListener('click', closeProjectsPanel);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeProjectsPanel(); });
+
+async function loadProjectsList() {
+  clearChildren(projectsList);
+  projectsList.textContent = '';
+
+  const res      = await fetch('/projects');
+  const projects = await res.json();
+
+  if (!projects.length) return;  // empty state via CSS :empty
+
+  projects.forEach(p => {
+    const now        = new Date();
+    const expires    = new Date(p.expires_at);
+    const daysLeft   = Math.ceil((expires - now) / 86400000);
+    const colorsMeta = `${p.color_count} кол. · ${p.circle_count} кружечків`;
+    const created    = new Date(p.created_at).toLocaleString('uk-UA', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'});
+
+    const card = document.createElement('div');
+    card.className = 'project-card';
+
+    // Thumbnail
+    const thumb = document.createElement(p.has_thumb ? 'img' : 'div');
+    if (p.has_thumb) {
+      thumb.className = 'project-thumb';
+      thumb.src = `/project/${p.id}/thumb`;
+      thumb.alt = p.name;
+    } else {
+      thumb.className = 'project-thumb-placeholder';
+      thumb.textContent = '🧵';
+    }
+
+    // Info
+    const info = document.createElement('div');
+    info.className = 'project-info';
+
+    const name = document.createElement('div');
+    name.className = 'project-name';
+    name.textContent = p.name;
+
+    const meta = document.createElement('div');
+    meta.className = 'project-meta';
+    meta.textContent = `${colorsMeta} · ${created}`;
+
+    const exp = document.createElement('div');
+    exp.className = 'project-expires ' + (daysLeft <= 5 ? 'soon' : 'ok');
+    exp.textContent = daysLeft <= 5
+      ? `⚠ Залишилось ${daysLeft} дн.`
+      : `Зберігається до ${expires.toLocaleDateString('uk-UA')}`;
+
+    info.append(name, meta, exp);
+
+    // Actions
+    const actions = document.createElement('div');
+    actions.className = 'project-actions';
+
+    const openBtn = document.createElement('button');
+    openBtn.className = 'btn btn-primary';
+    openBtn.textContent = 'Відкрити';
+    openBtn.addEventListener('click', () => { closeProjectsPanel(); openProject(p.id); });
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn btn-secondary';
+    delBtn.textContent = '✕';
+    delBtn.addEventListener('click', async () => {
+      await fetch(`/project/${p.id}`, { method: 'DELETE' });
+      card.remove();
+    });
+
+    actions.append(openBtn, delBtn);
+    card.append(thumb, info, actions);
+    projectsList.appendChild(card);
+  });
+}
+
+async function openProject(project_id) {
+  resetState();
+
+  saveBtn.disabled = true;
+  downloadBtn.disabled = true;
+  legendBtn.disabled = true;
+  canvasWrapper.hidden = true;
+  legendBar.hidden = true;
+  progressArea.hidden = false;
+  progressFill.style.width = '80%';
+  progressLabel.textContent = 'Завантаження проєкту...';
+
+  const res   = await fetch(`/project/${project_id}`);
+  const state = await res.json();
+
+  // Restore settings
+  beadData        = state.bead_data;
+  overrides       = _intKeys(state.overrides       || {});
+  displayNumbers  = _intKeys(state.display_numbers || {});
+  skipped         = new Set((state.skipped || []).map(Number));
+  currentSource   = { type: 'project', id: project_id };
+
+  thresholdSlider.value    = state.threshold ?? 12;
+  thresholdValueEl.textContent = thresholdSlider.value;
+
+  progressFill.style.width = '100%';
+  progressArea.hidden = true;
+
+  _showCanvas(`/project/${project_id}/image`);
+}
+
+// JSON keys are always strings; convert back to numbers for overrides/displayNumbers
+function _intKeys(obj) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) out[parseInt(k)] = v;
+  return out;
+}

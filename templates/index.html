@@ -27,7 +27,10 @@
   <button id="download-btn" class="btn btn-success" disabled
     data-tip="Завантажити оброблене зображення з цифрами у форматі PNG у повній роздільній здатності (2000 пікс.).">Завантажити PNG</button>
   <button id="legend-btn" class="btn btn-secondary" disabled
-    data-tip="Завантажити PNG-легенду: кольоровий квадрат з номером та кількістю кружечків для кожного кольору.">Скачати легенду</button>
+    data-tip="Переглянути легенду кольорів: квадрат із номером та кількістю кружечків. Там само можна завантажити PNG.">Відкрити легенду</button>
+  <span style="flex:1"></span>
+  <button id="projects-btn" class="btn btn-secondary"
+    data-tip="Відкрити панель проєктів: зберегти поточний стан або завантажити збережений.">☰ Проєкти</button>
 </header>
 
 <div id="legend-bar" hidden>
@@ -53,6 +56,44 @@
       data-tip="Коліщатко миші — зум · Затисніть ЛКМ та тягніть — пересування"></canvas>
   </div>
 </main>
+
+<!-- Legend modal -->
+<div id="legend-modal" hidden>
+  <div id="legend-modal-overlay"></div>
+  <div id="legend-modal-panel">
+    <div id="legend-modal-header">
+      <span>Легенда кольорів</span>
+      <div style="display:flex;gap:8px">
+        <button id="legend-download-btn" class="btn btn-success">⬇ Завантажити PNG</button>
+        <button id="legend-modal-close" class="btn btn-secondary">✕</button>
+      </div>
+    </div>
+    <div id="legend-modal-body">
+      <img id="legend-modal-img" src="" alt="Легенда">
+    </div>
+  </div>
+</div>
+
+<!-- Right projects sidebar (no overlay, doesn't block interaction) -->
+<aside id="projects-panel">
+  <div id="projects-header">
+    <span>Проєкти</span>
+    <button id="projects-close" class="btn btn-secondary" title="Закрити">✕</button>
+  </div>
+
+  <div id="projects-save-section">
+    <p class="projects-save-hint">Зберегти поточний стан: зображення, усі номери, кольори, налаштування.</p>
+    <button id="save-btn" class="btn btn-primary" disabled style="width:100%"
+      data-tip="Зберегти проєкт на 30 днів на сервері.">Зберегти проєкт</button>
+    <div id="save-feedback" hidden></div>
+  </div>
+
+  <div class="projects-divider">
+    <span>Збережені проєкти</span>
+  </div>
+
+  <div id="projects-list"></div>
+</aside>
 
 <script src="/static/app.js"></script>
 </body>
