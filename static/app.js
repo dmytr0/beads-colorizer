@@ -1,5 +1,42 @@
 'use strict';
 
+// ── Tooltip system ────────────────────────────────────────────────────────────
+const tipEl = document.createElement('div');
+tipEl.id = 'tooltip';
+tipEl.hidden = true;
+document.body.appendChild(tipEl);
+
+let tipTimer   = null;
+let tipMouseX  = 0;
+let tipMouseY  = 0;
+
+function addTip(el, text) {
+  el.addEventListener('mouseenter', e => {
+    tipMouseX = e.clientX;
+    tipMouseY = e.clientY;
+    clearTimeout(tipTimer);
+    tipTimer = setTimeout(() => {
+      tipEl.textContent = text;
+      tipEl.hidden = false;
+      const x = tipMouseX + 14;
+      const y = tipMouseY + 18;
+      tipEl.style.left = Math.min(x, window.innerWidth  - tipEl.offsetWidth  - 8) + 'px';
+      tipEl.style.top  = Math.min(y, window.innerHeight - tipEl.offsetHeight - 8) + 'px';
+    }, 2000);
+  });
+  el.addEventListener('mousemove', e => {
+    tipMouseX = e.clientX;
+    tipMouseY = e.clientY;
+  });
+  el.addEventListener('mouseleave', () => {
+    clearTimeout(tipTimer);
+    tipEl.hidden = true;
+  });
+}
+
+// Attach to all elements with data-tip in HTML
+document.querySelectorAll('[data-tip]').forEach(el => addTip(el, el.dataset.tip));
+
 const fileInput    = document.getElementById('file-input');
 const processBtn   = document.getElementById('process-btn');
 const downloadBtn  = document.getElementById('download-btn');
@@ -12,17 +49,25 @@ const progressLabel = document.getElementById('progress-label');
 const legendBar    = document.getElementById('legend-bar');
 const legendEl     = document.getElementById('legend');
 const placeholder  = document.getElementById('placeholder');
-const canvasArea   = document.getElementById('canvas-area');
+const canvasArea    = document.getElementById('canvas-area');
+const canvasWrapper = document.getElementById('canvas-wrapper');
 const zoomIndicator = document.getElementById('zoom-indicator');
 const canvas = document.getElementById('main-canvas');
 const ctx    = canvas.getContext('2d');
 
-let beadData      = null;
-let overrides     = {};       // {color_number: hex} — колір цифр
-let displayNumbers = {};      // {color_number: displayed_number}
-let skipped       = new Set();
-let sourceImage   = null;
-let zoom          = 1.0;
+let beadData       = null;
+let overrides      = {};
+let displayNumbers = {};
+let skipped        = new Set();
+let sourceImage    = null;
+
+let zoom        = 1.0;
+let targetZoom  = 1.0;
+let panX        = 0;
+let panY        = 0;
+let zoomPivotX  = 0;
+let zoomPivotY  = 0;
+let zoomRaf     = null;
 
 function resetState() {
   beadData = null;
@@ -31,6 +76,10 @@ function resetState() {
   skipped = new Set();
   sourceImage = null;
   zoom = 1.0;
+  targetZoom = 1.0;
+  panX = 0;
+  panY = 0;
+  if (zoomRaf) { cancelAnimationFrame(zoomRaf); zoomRaf = null; }
 }
 
 // ── Threshold slider ──────────────────────────────────────────────────────────
@@ -44,7 +93,7 @@ fileInput.addEventListener('change', () => {
     processBtn.disabled = false;
     downloadBtn.disabled = true;
     legendBtn.disabled = true;
-    canvas.hidden = true;
+    canvasWrapper.hidden = true;
     zoomIndicator.hidden = true;
     placeholder.hidden = false;
     legendBar.hidden = true;
@@ -112,14 +161,20 @@ async function loadResult(job_id) {
     drawNumbers();
     renderLegend();
 
-    // Fit image to canvas-area on first load
-    const availW = canvasArea.clientWidth  - 32;
-    const availH = canvasArea.clientHeight - 32;
-    zoom = Math.min(availW / beadData.image_width, availH / beadData.image_height, 1);
-    applyZoom();
+    // Fit image to canvas-area and center it
+    const fitZ = Math.min(
+      canvasArea.clientWidth  / beadData.image_width,
+      canvasArea.clientHeight / beadData.image_height,
+      1
+    );
+    zoom = fitZ;
+    targetZoom = fitZ;
+    panX = (canvasArea.clientWidth  - beadData.image_width  * fitZ) / 2;
+    panY = (canvasArea.clientHeight - beadData.image_height * fitZ) / 2;
+    applyTransform();
 
-    placeholder.hidden = false; placeholder.hidden = true;
-    canvas.hidden = false;
+    placeholder.hidden = true;
+    canvasWrapper.hidden = false;
     zoomIndicator.hidden = false;
     legendBar.hidden = false;
     progressArea.hidden = true;
@@ -129,21 +184,68 @@ async function loadResult(job_id) {
   };
 }
 
-// ── Zoom ──────────────────────────────────────────────────────────────────────
-canvasArea.addEventListener('wheel', e => {
-  if (canvas.hidden) return;
-  e.preventDefault();
-  const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-  zoom = Math.max(0.05, Math.min(10, zoom * factor));
-  applyZoom();
-}, { passive: false });
-
-function applyZoom() {
-  if (!beadData) return;
-  canvas.style.width  = Math.round(beadData.image_width  * zoom) + 'px';
-  canvas.style.height = Math.round(beadData.image_height * zoom) + 'px';
+// ── Transform ─────────────────────────────────────────────────────────────────
+function applyTransform() {
+  canvasWrapper.style.transform = `translate(${panX}px,${panY}px) scale(${zoom})`;
   zoomIndicator.textContent = Math.round(zoom * 100) + '%';
 }
+
+// ── Smooth zoom (RAF lerp, zoom toward cursor) ────────────────────────────────
+canvasArea.addEventListener('wheel', e => {
+  if (canvasWrapper.hidden) return;
+  e.preventDefault();
+  const rect = canvasArea.getBoundingClientRect();
+  zoomPivotX = e.clientX - rect.left;
+  zoomPivotY = e.clientY - rect.top;
+  const factor = e.deltaY < 0 ? 1.18 : 1 / 1.18;
+  targetZoom = Math.max(0.05, Math.min(10, targetZoom * factor));
+  if (!zoomRaf) zoomRaf = requestAnimationFrame(zoomTick);
+}, { passive: false });
+
+function zoomTick() {
+  const diff = targetZoom - zoom;
+  if (Math.abs(diff) < zoom * 0.0005) {
+    zoom = targetZoom;
+    applyTransform();
+    zoomRaf = null;
+    return;
+  }
+  // Keep the canvas point under zoomPivot fixed during lerp
+  const canvasX = (zoomPivotX - panX) / zoom;
+  const canvasY = (zoomPivotY - panY) / zoom;
+  zoom += diff * 0.08;
+  panX = zoomPivotX - canvasX * zoom;
+  panY = zoomPivotY - canvasY * zoom;
+  applyTransform();
+  zoomRaf = requestAnimationFrame(zoomTick);
+}
+
+// ── Pan (drag canvas freely) ──────────────────────────────────────────────────
+let isPanning  = false;
+let panDragX   = 0;
+let panDragY   = 0;
+
+canvasArea.addEventListener('mousedown', e => {
+  if (e.button !== 0 || canvasWrapper.hidden) return;
+  isPanning = true;
+  panDragX = e.clientX - panX;
+  panDragY = e.clientY - panY;
+  canvasArea.classList.add('is-panning');
+  e.preventDefault();
+});
+
+window.addEventListener('mousemove', e => {
+  if (!isPanning) return;
+  panX = e.clientX - panDragX;
+  panY = e.clientY - panDragY;
+  applyTransform();
+});
+
+window.addEventListener('mouseup', () => {
+  if (!isPanning) return;
+  isPanning = false;
+  canvasArea.classList.remove('is-panning');
+});
 
 // ── Canvas rendering ──────────────────────────────────────────────────────────
 function autoContrast(hex) {
@@ -228,14 +330,17 @@ function renderLegend() {
     circle.style.background = color.hex;
     circle.style.color = overrides[color.number] || autoContrast(color.hex);
     circle.textContent = String(displayNum);
+    addTip(circle, `Зразок кольору ${color.hex}\nПоточний номер: ${displayNum}`);
 
     const hexSpan = document.createElement('span');
     hexSpan.className = 'chip-hex';
     hexSpan.textContent = color.hex;
+    addTip(hexSpan, `HEX-код розпізнаного кольору.\nКлікніть на поле номера щоб змінити прив'язку.`);
 
     const countSpan = document.createElement('span');
     countSpan.className = 'chip-count';
     countSpan.textContent = 'x' + color.count;
+    addTip(countSpan, `На схемі ${color.count} кружечків цього кольору.`);
 
     const numInput = document.createElement('input');
     numInput.type = 'number';
@@ -246,6 +351,7 @@ function renderLegend() {
       const val = parseInt(e.target.value);
       if (val > 0) swapNumbers(color.number, val);
     });
+    addTip(numInput, 'Введіть новий номер і натисніть Enter.\nЯкщо такий номер вже є — кольори поміняються місцями (swap).');
 
     const skipLabel = document.createElement('label');
     skipLabel.className = 'chip-skip';
@@ -259,12 +365,12 @@ function renderLegend() {
       redrawNumbers();
     });
     skipLabel.append(skipCheck, document.createTextNode('skip'));
+    addTip(skipLabel, 'Виключити цей колір з нумерації.\nКружечки залишаться без цифр.\nУ легенді-файлі буде показано тільки кількість.');
 
     const pickerEl = document.createElement('div');
     if (overrides[color.number]) {
       pickerEl.className = 'color-square';
       pickerEl.style.background = overrides[color.number];
-      pickerEl.title = 'Подвійний клік — скинути на авто-контраст';
       pickerEl.addEventListener('click', () => openPicker(color.number, color.hex));
       pickerEl.addEventListener('dblclick', e => {
         e.stopPropagation();
@@ -272,11 +378,12 @@ function renderLegend() {
         renderLegend();
         redrawNumbers();
       });
+      addTip(pickerEl, 'Власний колір цифр.\nКлік — змінити колір.\nПодвійний клік — скинути на авто-контраст (WCAG).');
     } else {
       pickerEl.className = 'auto-icon';
       pickerEl.textContent = 'A';
-      pickerEl.title = 'Авто-контраст — клік щоб змінити';
       pickerEl.addEventListener('click', () => openPicker(color.number, color.hex));
+      addTip(pickerEl, 'Авто-контрастний колір цифр за формулою WCAG.\nЧорний на світлих, білий на темних фонах.\nКлік — вибрати власний колір.');
     }
 
     chip.append(circle, hexSpan, countSpan, numInput, skipLabel, pickerEl);

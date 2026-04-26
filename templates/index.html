@@ -11,18 +11,23 @@
 
 <header id="toolbar">
   <span class="logo">BeadsColorizer</span>
-  <label class="btn btn-secondary" id="upload-label">
+  <label class="btn btn-secondary" id="upload-label"
+    data-tip="Оберіть файл схеми бісеру (JPG або PNG). Зображення буде збільшено до 2000 пікселів по мінімальній стороні.">
     Завантажити фото
     <input type="file" id="file-input" accept="image/*" hidden>
   </label>
-  <div class="setting">
+  <div class="setting"
+    data-tip="Поріг розрізнення кольорів у LAB-просторі. Менше значення — більше унікальних кольорів, більше — менше. Рекомендовано: 10–20.">
     <label for="threshold-slider">Threshold:</label>
     <input type="range" id="threshold-slider" min="0" max="100" value="12">
     <span id="threshold-value">12</span>
   </div>
-  <button id="process-btn" class="btn btn-primary" disabled>Обробити</button>
-  <button id="download-btn" class="btn btn-success" disabled>Завантажити PNG</button>
-  <button id="legend-btn" class="btn btn-secondary" disabled>Скачати легенду</button>
+  <button id="process-btn" class="btn btn-primary" disabled
+    data-tip="Запустити обробку: виявити всі кружечки, розпізнати кольори, згрупувати схожі та пронумерувати.">Обробити</button>
+  <button id="download-btn" class="btn btn-success" disabled
+    data-tip="Завантажити оброблене зображення з цифрами у форматі PNG у повній роздільній здатності (2000 пікс.).">Завантажити PNG</button>
+  <button id="legend-btn" class="btn btn-secondary" disabled
+    data-tip="Завантажити PNG-легенду: кольоровий квадрат з номером та кількістю кружечків для кожного кольору.">Скачати легенду</button>
 </header>
 
 <div id="legend-bar" hidden>
@@ -43,7 +48,10 @@
     <p>Завантажте зображення та натисніть <b>Обробити</b></p>
     <p class="hint">Результат відобразиться тут у повній роздільній здатності (2000px)</p>
   </div>
-  <canvas id="main-canvas" hidden></canvas>
+  <div id="canvas-wrapper" hidden>
+    <canvas id="main-canvas"
+      data-tip="Коліщатко миші — зум · Затисніть ЛКМ та тягніть — пересування"></canvas>
+  </div>
 </main>
 
 <script src="/static/app.js"></script>
