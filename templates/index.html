@@ -85,6 +85,14 @@
     <p class="projects-save-hint">Зберегти поточний стан: зображення, усі номери, кольори, налаштування.</p>
     <button id="save-btn" class="btn btn-primary" disabled style="width:100%"
       data-tip="Зберегти проєкт на 30 днів на сервері.">Зберегти проєкт</button>
+    <div id="save-confirm" hidden>
+      <p id="save-confirm-msg" class="projects-save-hint" style="margin-top:8px">Цей проєкт вже збережений. Що зробити?</p>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button id="save-update-btn" class="btn btn-primary" style="flex:1">Оновити</button>
+        <button id="save-new-btn"    class="btn btn-secondary" style="flex:1">Новий</button>
+        <button id="save-cancel-btn" class="btn btn-secondary">Відміна</button>
+      </div>
+    </div>
     <div id="save-feedback" hidden></div>
   </div>
 

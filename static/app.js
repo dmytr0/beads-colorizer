@@ -308,6 +308,7 @@ function redrawNumbers() {
   if (!beadData || !sourceImage) return;
   ctx.drawImage(sourceImage, 0, 0);
   drawNumbers();
+  if (currentSource?.type === 'project') scheduleAutoSave();
 }
 
 // ── Number swap ───────────────────────────────────────────────────────────────
@@ -511,47 +512,142 @@ legendDownloadBtn.addEventListener('click', () => {
   a.click();
 });
 
-// ── Save project ──────────────────────────────────────────────────────────────
-saveBtn.addEventListener('click', async () => {
+// ── Auto-save for loaded projects ─────────────────────────────────────────────
+let autoSaveTimer = null;
+
+function scheduleAutoSave() {
+  clearTimeout(autoSaveTimer);
+  _setFeedback('• Зберігається...', '#8b949e', false);
+  autoSaveTimer = setTimeout(() => doUpdateProject(true), 2000);
+}
+
+function _setFeedback(text, color, hidden) {
+  saveFeedback.textContent = text;
+  saveFeedback.style.color = color || '#3fb950';
+  saveFeedback.hidden = hidden;
+}
+
+function _buildSavePayload() {
+  return {
+    threshold:       parseInt(thresholdSlider.value),
+    overrides:       overrides,
+    display_numbers: displayNumbers,
+    skipped:         [...skipped],
+    legend_b64:      buildLegendCanvas().toDataURL('image/png').split(',')[1],
+  };
+}
+
+async function doUpdateProject(silent = false) {
+  if (!currentSource || currentSource.type !== 'project') return;
+  try {
+    await fetch(`/project/${currentSource.id}`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(_buildSavePayload()),
+    });
+    if (!silent) {
+      _setFeedback('✓ Проєкт оновлено', '#3fb950', false);
+      loadProjectsList();
+    } else {
+      _setFeedback('✓ Автозбережено', '#484f58', false);
+      setTimeout(() => { saveFeedback.hidden = true; }, 2500);
+    }
+  } catch {
+    _setFeedback('✗ Помилка оновлення', '#f78166', false);
+  }
+}
+
+let _conflictProjectId = null;  // set when 409 duplicate detected
+
+async function doSaveNew(ignoreHash = false) {
   if (!beadData || !currentSource) return;
   saveBtn.disabled = true;
   saveBtn.textContent = 'Зберігаємо...';
   saveFeedback.hidden = true;
 
-  const legendDataUrl = buildLegendCanvas().toDataURL('image/png');
+  const payload = Object.assign(_buildSavePayload(), {
+    source_type:  currentSource.type,
+    source_id:    currentSource.id,
+    bead_data:    beadData,
+    ignore_hash:  ignoreHash,
+  });
 
-  const payload = {
-    source_type:     currentSource.type,
-    source_id:       currentSource.id,
-    threshold:       parseInt(thresholdSlider.value),
-    overrides:       overrides,
-    display_numbers: displayNumbers,
-    skipped:         [...skipped],
-    bead_data:       beadData,
-    legend_b64:      legendDataUrl.split(',')[1],
-  };
+  const res  = await fetch('/project', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+  const data = await res.json();
 
-  try {
-    const res  = await fetch('/project', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
-    const data = await res.json();
-    saveBtn.textContent = 'Зберегти проєкт';
-    saveBtn.disabled = false;
-    saveFeedback.textContent = `✓ Збережено: ${data.name}`;
-    saveFeedback.hidden = false;
-    loadProjectsList();
-  } catch {
-    saveBtn.textContent = 'Зберегти проєкт';
-    saveBtn.disabled = false;
-    saveFeedback.textContent = '✗ Помилка збереження';
-    saveFeedback.style.color = '#f78166';
-    saveFeedback.hidden = false;
+  saveBtn.textContent = 'Зберегти проєкт';
+  saveBtn.disabled = false;
+
+  if (res.status === 409 && data.conflict) {
+    // Duplicate detected — show confirm with project name
+    _conflictProjectId = data.project_id;
+    saveConfirmMsg.textContent = `Картинка вже збережена як «${data.name}». Що зробити?`;
+    saveConfirm.hidden = false;
+    saveBtn.hidden = true;
+    return;
+  }
+
+  if (!res.ok) {
+    _setFeedback('✗ Помилка збереження', '#f78166', false);
+    return;
+  }
+
+  currentSource = { type: 'project', id: data.project_id };
+  _conflictProjectId = null;
+  _setFeedback(`✓ Збережено: ${data.name}`, '#3fb950', false);
+  loadProjectsList();
+}
+
+// ── Save project button + confirm ─────────────────────────────────────────────
+const saveConfirm    = document.getElementById('save-confirm');
+const saveConfirmMsg = document.getElementById('save-confirm-msg');
+const saveUpdateBtn  = document.getElementById('save-update-btn');
+const saveNewBtn     = document.getElementById('save-new-btn');
+const saveCancelBtn  = document.getElementById('save-cancel-btn');
+
+function _hideConfirm() {
+  saveConfirm.hidden = true;
+  saveBtn.hidden = false;
+  _conflictProjectId = null;
+}
+
+saveBtn.addEventListener('click', () => {
+  if (!beadData || !currentSource) return;
+  if (currentSource.type === 'project') {
+    // Already a saved project
+    saveConfirmMsg.textContent = 'Цей проєкт вже збережений. Що зробити?';
+    saveConfirm.hidden = false;
+    saveBtn.hidden = true;
+    saveFeedback.hidden = true;
+  } else {
+    doSaveNew(false);
   }
 });
+
+saveUpdateBtn.addEventListener('click', () => {
+  const targetId = _conflictProjectId || (currentSource?.type === 'project' ? currentSource.id : null);
+  _hideConfirm();
+  if (targetId) {
+    currentSource = { type: 'project', id: targetId };
+    doUpdateProject(false).then(() => {
+      // If we updated a different project, keep the new currentSource
+    });
+  }
+});
+
+saveNewBtn.addEventListener('click', () => {
+  _hideConfirm();
+  doSaveNew(true);  // ignore_hash = true
+});
+
+saveCancelBtn.addEventListener('click', _hideConfirm);
 
 // ── Projects sidebar ──────────────────────────────────────────────────────────
 const projectsList = document.getElementById('projects-list');
 
 function openProjectsPanel() {
+  saveConfirm.hidden = true;
+  saveBtn.hidden = false;
   projectsPanel.classList.add('open');
   loadProjectsList();
 }

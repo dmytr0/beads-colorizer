@@ -1,5 +1,6 @@
 import os
 import base64
+import hashlib
 import json
 import uuid
 import queue
@@ -49,6 +50,14 @@ def _cleanup_expired_projects():
             pass
 
 
+def _file_hash(path: str) -> str:
+    h = hashlib.md5()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(65536), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _make_thumbnail(src_path: str, dst_path: str):
     img = Image.open(src_path)
     img.thumbnail((280, 400))
@@ -61,6 +70,7 @@ def process_image(job_id: str, image_path: str, threshold: int):
     q = jobs[job_id]['queue']
     try:
         q.put({'step': 'upscaling', 'label': 'Збільшення зображення', 'progress': 10})
+        image_hash = _file_hash(image_path)
         image = cv2.imread(image_path)
         if image is None:
             raise ValueError('Не вдалося відкрити зображення')
@@ -89,10 +99,11 @@ def process_image(job_id: str, image_path: str, threshold: int):
             for c in clusters
         ]
         result = {
-            'image_width': image.shape[1],
+            'image_width':  image.shape[1],
             'image_height': image.shape[0],
-            'circles': circle_data,
-            'colors': color_data,
+            'image_hash':   image_hash,
+            'circles':      circle_data,
+            'colors':       color_data,
         }
         with open(os.path.join(TMP_DIR, job_id, 'data.json'), 'w') as f:
             json.dump(result, f)
@@ -173,6 +184,25 @@ def save_project():
     _cleanup_expired_projects()
     data = request.get_json()
 
+    # Duplicate check by image hash (skip if ignore_hash=true)
+    image_hash = (data.get('bead_data') or {}).get('image_hash')
+    if image_hash and not data.get('ignore_hash'):
+        for pid in os.listdir(PROJECTS_DIR):
+            sp = os.path.join(PROJECTS_DIR, pid, 'state.json')
+            if not os.path.exists(sp):
+                continue
+            try:
+                with open(sp) as f:
+                    s = json.load(f)
+                if s.get('image_hash') == image_hash:
+                    return jsonify({
+                        'conflict': True,
+                        'project_id': s['id'],
+                        'name': s['name'],
+                    }), 409
+            except Exception:
+                pass
+
     source_type = data.get('source_type', 'job')   # 'job' | 'project'
     source_id   = data.get('source_id', '')
 
@@ -184,15 +214,16 @@ def save_project():
     name = data.get('name') or now.strftime('%d.%m.%Y %H:%M')
 
     state = {
-        'id':             project_id,
-        'name':           name,
-        'created_at':     now.isoformat(),
-        'expires_at':     (now + timedelta(days=PROJECT_TTL_DAYS)).isoformat(),
-        'threshold':      data.get('threshold', 12),
-        'overrides':      data.get('overrides', {}),
+        'id':              project_id,
+        'name':            name,
+        'created_at':      now.isoformat(),
+        'expires_at':      (now + timedelta(days=PROJECT_TTL_DAYS)).isoformat(),
+        'image_hash':      image_hash,
+        'threshold':       data.get('threshold', 12),
+        'overrides':       data.get('overrides', {}),
         'display_numbers': data.get('display_numbers', {}),
-        'skipped':        data.get('skipped', []),
-        'bead_data':      data['bead_data'],
+        'skipped':         data.get('skipped', []),
+        'bead_data':       data['bead_data'],
     }
 
     with open(os.path.join(project_dir, 'state.json'), 'w') as f:
@@ -251,6 +282,35 @@ def list_projects():
 
     projects.sort(key=lambda p: p['created_at'], reverse=True)
     return jsonify(projects)
+
+
+@app.route('/project/<project_id>', methods=['PUT'])
+def update_project(project_id):
+    state_path = os.path.join(PROJECTS_DIR, project_id, 'state.json')
+    if not os.path.exists(state_path):
+        return jsonify({'error': 'not found'}), 404
+
+    data = request.get_json()
+    with open(state_path) as f:
+        state = json.load(f)
+
+    state['threshold']       = data.get('threshold',       state.get('threshold', 12))
+    state['overrides']       = data.get('overrides',       state.get('overrides', {}))
+    state['display_numbers'] = data.get('display_numbers', state.get('display_numbers', {}))
+    state['skipped']         = data.get('skipped',         state.get('skipped', []))
+
+    with open(state_path, 'w') as f:
+        json.dump(state, f)
+
+    legend_b64 = data.get('legend_b64')
+    if legend_b64:
+        try:
+            with open(os.path.join(PROJECTS_DIR, project_id, 'legend.png'), 'wb') as f:
+                f.write(base64.b64decode(legend_b64))
+        except Exception:
+            pass
+
+    return jsonify({'ok': True})
 
 
 @app.route('/project/<project_id>')
