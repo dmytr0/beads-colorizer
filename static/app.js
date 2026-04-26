@@ -15,8 +15,18 @@ const canvas = document.getElementById('main-canvas');
 const ctx = canvas.getContext('2d');
 
 let beadData = null;
-let overrides = {};
+let overrides = {};       // {color_number: hex_string} — колір тексту
+let displayNumbers = {};  // {color_number: displayed_number} — перестановка номерів
+let skipped = new Set();  // set of color_numbers — виключити з нумерації
 let sourceImage = null;
+
+function resetState() {
+  beadData = null;
+  overrides = {};
+  displayNumbers = {};
+  skipped = new Set();
+  sourceImage = null;
+}
 
 thresholdSlider.addEventListener('input', () => {
   thresholdValueEl.textContent = thresholdSlider.value;
@@ -29,9 +39,7 @@ fileInput.addEventListener('change', () => {
     canvas.hidden = true;
     placeholder.hidden = false;
     legendBar.hidden = true;
-    beadData = null;
-    overrides = {};
-    sourceImage = null;
+    resetState();
   }
 });
 
@@ -44,6 +52,7 @@ processBtn.addEventListener('click', async () => {
   progressArea.hidden = false;
   progressFill.style.width = '0%';
   progressLabel.textContent = 'Завантаження...';
+  resetState();
 
   const formData = new FormData();
   formData.append('file', fileInput.files[0]);
@@ -115,6 +124,10 @@ function getColorHex(colorNumber) {
   return found ? found.hex : '#888888';
 }
 
+function getDisplayNumber(colorNumber) {
+  return displayNumbers[colorNumber] !== undefined ? displayNumbers[colorNumber] : colorNumber;
+}
+
 function computeFontSize(radius, text) {
   const maxWidth = radius * 1.6;
   let size = radius * 1.2;
@@ -127,9 +140,10 @@ function computeFontSize(radius, text) {
 function drawNumbers() {
   if (!beadData) return;
   beadData.circles.forEach(circle => {
+    if (skipped.has(circle.color_number)) return;
     const hex = getColorHex(circle.color_number);
     const textColor = overrides[circle.color_number] || autoContrast(hex);
-    const text = String(circle.color_number);
+    const text = String(getDisplayNumber(circle.color_number));
     const size = computeFontSize(circle.radius, text);
     ctx.font = 'bold ' + size + 'px Arial';
     ctx.fillStyle = textColor;
@@ -145,6 +159,22 @@ function redrawNumbers() {
   drawNumbers();
 }
 
+// Swap displayed numbers between two colors.
+// newNum — the number the user typed for colorNumber.
+function swapNumbers(colorNumber, newNum) {
+  const currentNum = getDisplayNumber(colorNumber);
+  if (newNum === currentNum) return;
+
+  // Find which other color currently shows newNum
+  const other = beadData.colors.find(c => getDisplayNumber(c.number) === newNum);
+
+  displayNumbers[colorNumber] = newNum;
+  if (other) displayNumbers[other.number] = currentNum;
+
+  renderLegend();
+  redrawNumbers();
+}
+
 function clearChildren(el) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
@@ -152,25 +182,59 @@ function clearChildren(el) {
 function renderLegend() {
   clearChildren(legendEl);
   beadData.colors.forEach(color => {
-    const chip = document.createElement('div');
-    chip.className = 'color-chip' + (overrides[color.number] ? ' overridden' : '');
+    const isSkipped = skipped.has(color.number);
+    const displayNum = getDisplayNumber(color.number);
 
+    const chip = document.createElement('div');
+    const classes = ['color-chip'];
+    if (overrides[color.number]) classes.push('overridden');
+    if (isSkipped) classes.push('skipped');
+    chip.className = classes.join(' ');
+
+    // Colored circle with displayed number
     const circle = document.createElement('div');
     circle.className = 'chip-circle';
     circle.style.background = color.hex;
     circle.style.color = overrides[color.number] || autoContrast(color.hex);
-    circle.textContent = String(color.number);
+    circle.textContent = String(displayNum);
 
+    // Hex code
     const hexSpan = document.createElement('span');
     hexSpan.className = 'chip-hex';
     hexSpan.textContent = color.hex;
 
+    // Count
     const countSpan = document.createElement('span');
     countSpan.className = 'chip-count';
     countSpan.textContent = 'x' + color.count;
 
-    const pickerEl = document.createElement('div');
+    // Number input — swap on change
+    const numInput = document.createElement('input');
+    numInput.type = 'number';
+    numInput.className = 'chip-num-input';
+    numInput.value = displayNum;
+    numInput.min = 1;
+    numInput.addEventListener('change', e => {
+      const val = parseInt(e.target.value);
+      if (val > 0) swapNumbers(color.number, val);
+    });
 
+    // Skip checkbox
+    const skipLabel = document.createElement('label');
+    skipLabel.className = 'chip-skip';
+    const skipCheck = document.createElement('input');
+    skipCheck.type = 'checkbox';
+    skipCheck.checked = isSkipped;
+    skipCheck.addEventListener('change', () => {
+      if (skipCheck.checked) skipped.add(color.number);
+      else skipped.delete(color.number);
+      renderLegend();
+      redrawNumbers();
+    });
+    skipLabel.append(skipCheck, document.createTextNode('skip'));
+
+    // Color picker
+    const pickerEl = document.createElement('div');
     if (overrides[color.number]) {
       pickerEl.className = 'color-square';
       pickerEl.style.background = overrides[color.number];
@@ -189,7 +253,7 @@ function renderLegend() {
       pickerEl.addEventListener('click', () => openPicker(color.number, color.hex));
     }
 
-    chip.append(circle, hexSpan, countSpan, pickerEl);
+    chip.append(circle, hexSpan, countSpan, numInput, skipLabel, pickerEl);
     legendEl.appendChild(chip);
   });
 }

@@ -65,6 +65,32 @@ body {
   font-size: 11px;
 }
 .color-chip.overridden { border-color: #f78166; }
+.color-chip.skipped { opacity: 0.4; }
+
+.chip-num-input {
+  width: 38px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #c9d1d9;
+  font-size: 11px;
+  padding: 2px 4px;
+  text-align: center;
+}
+.chip-num-input:focus { outline: none; border-color: #7ec8e3; }
+.chip-num-input::-webkit-inner-spin-button { opacity: 0.4; }
+
+.chip-skip {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: #8b949e;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.chip-skip input[type=checkbox] { cursor: pointer; accent-color: #7ec8e3; }
 .chip-circle {
   width: 22px;
   height: 22px;
